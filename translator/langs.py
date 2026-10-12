@@ -6,11 +6,12 @@ LANGUAGES: dict[str, dict[str, str]] = {
     "zh": {"nom": "китайский", "gen": "китайского", "skill": "zh-ru.md"},
     "ko": {"nom": "корейский", "gen": "корейского", "skill": "ko-ru.md"},
     "en": {"nom": "английский", "gen": "английского", "skill": "en-ru.md"},
+    "ja": {"nom": "японский", "gen": "японского", "skill": "ja-ru.md"},
     "ru": {"nom": "русский", "gen": "русского", "skill": ""},
 }
 
 # "auto" означает автоопределение языка источника.
-SOURCE_CHOICES = ("zh", "ko", "en", "auto")
+SOURCE_CHOICES = ("zh", "ko", "en", "ja", "auto")
 
 DEFAULT_SOURCE = "zh"
 DEFAULT_TARGET = "ru"

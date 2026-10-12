@@ -12,7 +12,7 @@
   },
 
   "translation": {
-    "_comment": "source: zh | ko | en | auto — режим по умолчанию, его можно сменить при старте (меню) или флагом --source.",
+    "_comment": "source: zh | ko | en | ja | auto — режим по умолчанию, его можно сменить при старте (меню) или флагом --source.",
     "source": "zh",
     "target": "ru",
 

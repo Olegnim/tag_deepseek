@@ -24,7 +24,7 @@ DEFAULTS: dict = {
         "max_retries": 4,
     },
     "translation": {
-        "source": "zh",          # zh | ko | en | auto
+        "source": "zh",          # zh | ko | en | ja | auto
         "target": "ru",
         "batch_blocks": 40,      # сколько блоков отправлять за один запрос
         "batch_chars": 6000,     # и сколько символов максимум в одном запросе

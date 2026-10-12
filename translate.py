@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Агент-переводчик на DeepSeek: китайский / корейский / английский → русский.
+"""Агент-переводчик на DeepSeek: китайский / корейский / английский / японский → русский.
 
 Форматы на входе: простой текст (.txt) и субтитры (.srt).
 Результат пишется рядом с исходником: movie.srt → movie.ru.srt.
@@ -8,6 +8,7 @@
     python translate.py subtitles.srt
     python translate.py story.txt --source ko -o story.ru.txt
     python translate.py interview.srt --source en --no-web
+    python translate.py manga.txt --source ja
 """
 
 from __future__ import annotations
@@ -36,12 +37,13 @@ MENU = [
     ("zh", "Китайский → Русский (по умолчанию)"),
     ("ko", "Корейский → Русский"),
     ("en", "Английский → Русский"),
+    ("ja", "Японский → Русский"),
     ("auto", "Определить язык автоматически"),
 ]
 
 DETECT_PROMPT = (
     "Определи язык текста. Ответь одним кодом и больше ничем: "
-    "zh — китайский, ko — корейский, en — английский.\n\nТекст:\n"
+    "zh — китайский, ko — корейский, en — английский, ja — японский.\n\nТекст:\n"
 )
 
 
@@ -60,7 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-o", "--output", default=None,
                         help="куда писать перевод (по умолчанию <имя>.<язык>.<расширение>)")
     parser.add_argument("-s", "--source", default=None, choices=SOURCE_CHOICES,
-                        help="язык оригинала: zh (по умолчанию), ko, en, auto")
+                        help="язык оригинала: zh (по умолчанию), ko, en, ja, auto")
     parser.add_argument("--to", default=DEFAULT_TARGET, choices=("ru",),
                         help="язык перевода (по умолчанию ru)")
     parser.add_argument("-g", "--glossary", default=None,
@@ -118,7 +120,7 @@ def sample_text(make_segments, limit: int = 4000) -> str:
 def detect_language(client: DeepSeekClient, sample: str) -> str | None:
     response = client.chat([{"role": "user", "content": DETECT_PROMPT + sample[:4000]}])
     answer = (response.choices[0].message.content or "").strip().lower()
-    for code in ("zh", "ko", "en"):
+    for code in ("zh", "ko", "en", "ja"):
         if code in answer:
             return code
     return None
@@ -156,7 +158,7 @@ def main() -> int:
         print("Определяю язык оригинала...")
         detected = detect_language(client, sample)
         if detected is None:
-            print("Язык определить не удалось — укажите его флагом --source (zh/ko/en).")
+            print("Язык определить не удалось — укажите его флагом --source (zh/ko/en/ja).")
             return 2
         source = detected
         print(f"Определён язык: {lang_name(source)}")

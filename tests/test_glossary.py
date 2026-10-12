@@ -29,11 +29,15 @@ def test_select_terms_filters_by_lang_and_text():
     terms = [
         glossary.Term("zh", "人工智能", "искусственный интеллект"),
         glossary.Term("ko", "인공지능", "искусственный интеллект"),
+        glossary.Term("ja", "人工知能", "искусственный интеллект"),
         glossary.Term("", "AI", "ИИ"),
     ]
     selected = glossary.select_terms(terms, "zh", "Тут есть 人工智能 и AI")
     sources = {t.source for t in selected}
     assert sources == {"人工智能", "AI"}
+
+    japanese = glossary.select_terms(terms, "ja", "人工知能 и AI")
+    assert {t.source for t in japanese} == {"人工知能", "AI"}
 
 
 def test_format_terms():
