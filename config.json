@@ -31,6 +31,11 @@
   "input_dir": "input",
   "output_dir": "output",
 
+  "ui": {
+    "_comment": "progress: строка прогресса с баром, счётчиком токенов и индикатором «модель думает». Выключается флагом --no-progress.",
+    "progress": true
+  },
+
   "tools": {
     "web": {
       "enabled": true,

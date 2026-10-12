@@ -36,6 +36,7 @@ from translator.client import ApiError, DeepSeekClient
 from translator.glossary import load_glossary
 from translator.langs import DEFAULT_SOURCE, DEFAULT_TARGET, SOURCE_CHOICES, lang_name
 from translator.pipeline import Stats, Translator
+from translator.progress import Progress
 from translator.skills import load_skills, skill_names
 
 MENU = [
@@ -76,6 +77,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="файл терминологии (TSV), по умолчанию glossary/terms.tsv")
     parser.add_argument("--no-web", action="store_true",
                         help="запретить веб-поиск при переводе")
+    parser.add_argument("--no-progress", action="store_true",
+                        help="выключить прогресс-бар (полезно в логах и конвейерах)")
     parser.add_argument("--batch-blocks", type=int, default=None,
                         help="сколько блоков отправлять за один запрос (по умолчанию 40)")
     parser.add_argument("--input-dir", default=None,
@@ -161,6 +164,13 @@ def resolve_source(args_source: str | None, cfg: dict) -> str:
     return choose_source_interactive(default_source) if sys.stdin.isatty() else default_source
 
 
+def progress_enabled(cfg: dict, args: argparse.Namespace) -> bool:
+    """Строка прогресса: разрешена конфигом и не выключена флагом --no-progress."""
+    if getattr(args, "no_progress", False):
+        return False
+    return bool(cfg.get("ui", {}).get("progress", True))
+
+
 def translate_file(
     path: Path,
     output_path: Path,
@@ -172,12 +182,14 @@ def translate_file(
     clear_input: bool,
     skills_dir: Path,
     glossary_path: Path,
+    progress: Progress | None = None,
 ) -> tuple[bool, str, Stats | None]:
     """Переводит один файл. Возвращает (успех, сообщение, статистика).
 
     Никогда не бросает ошибки ввода-вывода и API: они превращаются в сообщение,
     чтобы пакетный режим не прерывался на одном проблемном файле.
     """
+    progress = progress if progress is not None else Progress(enabled=False)
     try:
         fmt = formats.detect_format(path)
         make_segments = make_segment_source(path, fmt, cfg)
@@ -192,6 +204,7 @@ def translate_file(
 
     actual_source = source
     if source == "auto":
+        progress.note(f"    определяю язык оригинала: {path.name}…")
         try:
             sample = sample_text(make_segments)
             detected = detect_language(client, sample) if sample.strip() else None
@@ -216,27 +229,36 @@ def translate_file(
         terms=terms,
         fmt=fmt,
         use_web=use_web,
+        progress=progress,
     )
 
     print(f"    {fmt} | {lang_name(actual_source)} → {lang_name(target)} | блоков: {total}")
+    progress.start(total=total, title=path.name)
 
     try:
         with open(output_path, "w", encoding="utf-8", newline="\n") as out_fh:
             stats = translator.run(make_segments(), out_fh, total=total)
     except OSError as exc:
+        progress.stop()
         inbox.remove_partial(output_path)
         return False, f"ошибка записи в {output_path}: {exc}", None
     except ApiError as exc:
+        progress.stop()
         inbox.remove_partial(output_path)
         return False, f"ошибка API: {exc}", None
     except KeyboardInterrupt:
+        progress.stop()
         raise
+    progress.finish()
 
     details = f"{stats.blocks} блоков за {stats.elapsed:.1f} с"
     if stats.tool_calls:
         details += f", веб-запросов: {stats.tool_calls}"
     if stats.total_tokens:
-        details += f", токенов: {stats.total_tokens}"
+        details += (
+            f", токенов: {stats.total_tokens}"
+            f" (запрос {stats.prompt_tokens} + ответ {stats.completion_tokens})"
+        )
 
     if stats.failed:
         return True, f"{details}. Без перевода: {stats.failed} — исходник оставлен в input", stats
@@ -301,11 +323,15 @@ def main() -> int:
 
     source = resolve_source(args.source, cfg)
 
+    progress = Progress(enabled=progress_enabled(cfg, args))
     try:
         client = DeepSeekClient(cfg)
     except ApiError as exc:
         print(exc)
         return 3
+    # Сообщения клиента (сбои, повторы) идут через журнал прогресса, чтобы
+    # не ломать строку состояния.
+    client.log = progress.note
 
     if args.batch_blocks:
         cfg["translation"]["batch_blocks"] = args.batch_blocks
@@ -348,8 +374,10 @@ def main() -> int:
                 clear_input=clear_input,
                 skills_dir=skills_dir,
                 glossary_path=glossary_path,
+                progress=progress,
             )
         except KeyboardInterrupt:
+            progress.stop()
             print(f"\nПрервано пользователем. Частичный перевод: {output_path}")
             interrupted = True
             break

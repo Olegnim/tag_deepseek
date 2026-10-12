@@ -17,6 +17,7 @@ from typing import Iterator
 from . import formats, prompts
 from .client import ApiError, DeepSeekClient
 from .glossary import Term, select_terms
+from .progress import Progress
 from .websearch import fetch_url, web_search
 
 TOOL_SPECS = [
@@ -57,6 +58,7 @@ TOOL_SPECS = [
 @dataclass
 class Stats:
     blocks: int = 0
+    written: int = 0
     batches: int = 0
     failed: int = 0
     tool_calls: int = 0
@@ -120,6 +122,7 @@ class Translator:
         fmt: str,
         use_web: bool = True,
         log=print,
+        progress: Progress | None = None,
     ) -> None:
         translation = cfg["translation"]
         web = cfg.get("tools", {}).get("web", {})
@@ -138,6 +141,7 @@ class Translator:
         self.web_max_chars = int(web.get("max_chars", 12000))
         self.web_results = int(web.get("results", 5))
         self.log = log
+        self.progress = progress if progress is not None else Progress(enabled=False, log=log)
         self.recent: list[str] = []
 
     # ------------------------------------------------------------ запуск
@@ -180,8 +184,7 @@ class Translator:
             stats.batches += 1
             first = api_segments[0].seq
             last = api_segments[-1].seq
-            where = f"{first}-{last}" + (f" из {total}" if total else "")
-            self.log(f"[пакет {stats.batches}] блоки {where}")
+            self.progress.batch_started(stats.batches, first, last, total)
             translations = self._translate(api_segments, stats)
             for segment in api_segments:
                 if segment.seq in translations:
@@ -189,7 +192,9 @@ class Translator:
                 else:
                     segment.translated = segment.text
                     stats.failed += 1
-                    self.log(f"  ! блок {segment.seq}: перевод не получен, оставлен оригинал")
+                    self.progress.warning(
+                        f"  ! блок {segment.seq}: перевод не получен, оставлен оригинал"
+                    )
             if self.context_blocks:
                 self.recent = [s.translated for s in api_segments][-self.context_blocks:]
 
@@ -197,6 +202,9 @@ class Translator:
             text = segment.text if segment.passthrough else segment.translated
             formats.write_segment(out_fh, self.fmt, segment, text)
             out_fh.flush()
+            if not segment.passthrough:
+                stats.written += 1
+        self._sync(stats)
 
     # ------------------------------------------------------------ модель
 
@@ -204,10 +212,14 @@ class Translator:
         messages = self._messages(segments)
         tools = TOOL_SPECS if self.use_web else None
         attempts = self.max_tool_steps + 2
+        after_tools = False
 
         for _ in range(attempts):
-            response = self._chat(messages, tools)
+            label = "модель думает после веб-поиска" if after_tools else "модель думает"
+            response = self._chat(messages, tools, label=label)
+            after_tools = False
             self._count_usage(response, stats)
+            self._sync(stats)
             message = response.choices[0].message
             tool_calls = getattr(message, "tool_calls", None)
             if tool_calls:
@@ -217,6 +229,8 @@ class Translator:
                     messages.append(
                         {"role": "tool", "tool_call_id": call.id, "content": result}
                     )
+                after_tools = True
+                self._sync(stats)
                 continue
             parsed = parse_translation_json(message.content or "")
             if parsed is not None:
@@ -232,18 +246,19 @@ class Translator:
                 }
             )
 
-        self.log("  ! пакет не удалось разобрать, перевожу блоки по одному")
+        self.progress.warning("  ! пакет не удалось разобрать, перевожу блоки по одному")
         return self._translate_one_by_one(segments, stats)
 
     def _translate_one_by_one(self, segments: list[formats.Segment], stats: Stats) -> dict[int, str]:
         result: dict[int, str] = {}
         for segment in segments:
             try:
-                response = self._chat(self._messages([segment]), None)
+                response = self._chat(self._messages([segment]), None, label="перевод по одному блоку")
             except ApiError as exc:
-                self.log(f"  ! блок {segment.seq}: {exc}")
+                self.progress.warning(f"  ! блок {segment.seq}: {exc}")
                 continue
             self._count_usage(response, stats)
+            self._sync(stats)
             content = (response.choices[0].message.content or "").strip()
             parsed = parse_translation_json(content)
             if parsed and segment.seq in parsed:
@@ -266,8 +281,22 @@ class Translator:
             use_web=self.use_web,
         )
 
-    def _chat(self, messages: list, tools: list | None):
-        return self.client.chat(messages, tools=tools)
+    def _chat(self, messages: list, tools: list | None, label: str = "модель думает"):
+        """Запрос к модели с индикатором ожидания в строке прогресса."""
+        self.progress.request_started(label)
+        try:
+            return self.client.chat(messages, tools=tools)
+        finally:
+            self.progress.request_finished()
+
+    def _sync(self, stats: Stats) -> None:
+        """Переносит счётчики статистики в строку прогресса."""
+        self.progress.update(
+            blocks=stats.written,
+            batches=stats.batches,
+            tool_calls=stats.tool_calls,
+            tokens=stats.total_tokens,
+        )
 
     def _run_tool(self, call, stats: Stats) -> str:
         name = call.function.name
@@ -279,13 +308,16 @@ class Translator:
         try:
             if name == "web_search":
                 query = str(args.get("query", ""))
-                self.log(f"  · поиск: {query}")
+                self.progress.phase(f"ищу: {query}")
+                self.progress.note(f"  · поиск: {query}")
                 return web_search(query, max_results=self.web_results, timeout=self.web_timeout)
             if name == "fetch_url":
                 url = str(args.get("url", ""))
-                self.log(f"  · страница: {url}")
+                self.progress.phase("читаю страницу")
+                self.progress.note(f"  · страница: {url}")
                 return fetch_url(url, max_chars=self.web_max_chars, timeout=self.web_timeout)
         except Exception as exc:  # noqa: BLE001 — инструмент не должен ломать перевод
+            self.progress.warning(f"  ! {name} не сработал: {exc}")
             return f"Инструмент {name} завершился ошибкой: {exc}"
         return f"Неизвестный инструмент: {name}"
 

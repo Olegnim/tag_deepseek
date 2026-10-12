@@ -38,6 +38,9 @@ DEFAULTS: dict = {
     "skills_dir": "skills",
     "input_dir": "input",
     "output_dir": "output",
+    "ui": {
+        "progress": True,        # прогресс-бар и строка «модель думает» в терминале
+    },
     "tools": {
         "web": {
             "enabled": True,
