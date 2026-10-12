@@ -44,7 +44,9 @@ _FALLBACK_WIDTH = 80
 # Через сколько секунд после старта общее время перестаёт дублировать время фазы.
 _TIME_DUP = 3.0
 # Порядок частей строки состояния.
-_SLOT_ORDER = ("title", "bar", "blocks", "activity", "time", "tokens", "web", "batches")
+_SLOT_ORDER = (
+    "title", "bar", "blocks", "activity", "batch", "time", "tokens", "web", "batches",
+)
 
 
 def human_int(value: int) -> str:
@@ -119,6 +121,7 @@ class Progress:
 
         self._label = "подготовка"
         self._phase_since: float | None = None
+        self._batch = ""
         self._frame = 0
         self._last_width = 0
         self._lock = threading.RLock()
@@ -137,6 +140,7 @@ class Progress:
         self.tokens = 0
         self.started = time.time()
         self.title = title
+        self._batch = ""
         self._last_width = 0
         self._set_phase("подготовка")
         self._start_spinner()
@@ -187,6 +191,9 @@ class Progress:
     def batch_started(self, index: int, first: int, last: int, total: int = 0) -> None:
         """Отмечает начало нового пакета блоков."""
         where = f"{first}-{last}" + (f" из {total}" if total else "")
+        # Пакет остаётся в строке состояния, пока он в работе: по нему видно,
+        # какие именно блоки сейчас переводит модель.
+        self._batch = f"пакет {index}: блоки {where}"
         self._set_phase(f"пакет {index}: блоки {where}")
         if self.enabled:
             self._render()
@@ -198,6 +205,11 @@ class Progress:
             details.append(f"прошло {human_seconds(self._elapsed())}")
         tail = (" · " + " · ".join(details)) if details else ""
         self.log(f"[пакет {index}] блоки {where}{tail}")
+
+    def batch_finished(self) -> None:
+        """Пакет записан: диапазон блоков больше не «в работе»."""
+        self._batch = ""
+        self._render()
 
     def request_started(self, label: str = "модель думает") -> None:
         """Показывает, что запрос ушёл в модель и ответ ещё не пришёл."""
@@ -346,6 +358,9 @@ class Progress:
             if display_width(text) > self._room(slots, limit):
                 continue
             slots[name] = text
+
+        if self._batch and display_width(self._batch) <= self._room(slots, limit):
+            slots["batch"] = self._batch
 
         if self.title:
             room = min(_MAX_TITLE, self._room(slots, limit))

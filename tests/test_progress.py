@@ -139,6 +139,38 @@ def test_narrow_terminal_drops_counters_but_keeps_bar(monkeypatch):
     assert "веб-запросов" not in line
 
 
+def test_current_batch_is_visible_in_status_line(monkeypatch):
+    """Пока модель думает, видно, какие блоки в работе."""
+    monkeypatch.setenv("COLUMNS", "160")
+    stream = TTY()
+    progress = Progress(stream=stream, enabled=True)
+    progress.start(total=53, title="20261002.txt")
+    progress.update(blocks=9, batches=1)
+    progress.batch_started(2, 10, 44, 53)
+    progress.request_started("модель думает")
+    line = progress._line()
+    progress.finish()
+
+    assert "пакет 2: блоки 10-44 из 53" in line
+    assert "модель думает" in line
+    assert display_width(line) <= 159
+
+
+def test_batch_label_dropped_on_narrow_terminal(monkeypatch):
+    monkeypatch.setenv("COLUMNS", "60")
+    stream = TTY()
+    progress = Progress(stream=stream, enabled=True)
+    progress.start(total=53)
+    progress.batch_started(2, 10, 44, 53)
+    progress.request_started("модель думает")
+    line = progress._line()
+    progress.finish()
+
+    assert "пакет 2" not in line
+    assert "модель думает" in line
+    assert display_width(line) <= 59
+
+
 def test_phase_label_is_shown_in_status_line(monkeypatch):
     monkeypatch.setenv("COLUMNS", "120")
     stream = TTY()

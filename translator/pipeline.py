@@ -205,6 +205,8 @@ class Translator:
             if not segment.passthrough:
                 stats.written += 1
         self._sync(stats)
+        if api_segments:
+            self.progress.batch_finished()
 
     # ------------------------------------------------------------ модель
 

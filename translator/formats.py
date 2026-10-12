@@ -61,31 +61,50 @@ def iter_lines(path: Path) -> Iterator[str]:
 # ---------------------------------------------------------------- SRT
 
 def iter_srt_segments(path: Path) -> Iterator[Segment]:
-    """Разбирает .srt на блоки, не загружая файл целиком."""
-    block: list[str] = []
+    """Разбирает .srt на блоки, не загружая файл целиком.
+
+    Границей блока считается строка тайминга («-->»): если в файле пропущена
+    пустая строка, новый блок всё равно начинается с тайминга, а строка с
+    номером следующего блока не попадает в текст предыдущего — тайминги и
+    нумерация не съезжают.
+    """
+    lines: list[str] = []
+    in_cue = False
     for line in iter_lines(path):
         if line.strip() == "":
-            if block:
-                yield _srt_block_to_segment(block)
-                block = []
-        else:
-            block.append(line)
-    if block:
-        yield _srt_block_to_segment(block)
+            if lines:
+                yield _srt_block_to_segment(lines)
+                lines = []
+            in_cue = False
+            continue
+        if "-->" in line:
+            if in_cue:
+                # Предыдущий блок закончился без пустой строки: закрываем его,
+                # а строку-номер следующего блока оставляем для нового блока.
+                rest: list[str] = []
+                if lines and lines[-1].strip().isdigit():
+                    rest.append(lines.pop())
+                if lines:
+                    yield _srt_block_to_segment(lines)
+                lines = rest
+            in_cue = True
+        lines.append(line)
+    if lines:
+        yield _srt_block_to_segment(lines)
 
 
 def _srt_block_to_segment(lines: list[str]) -> Segment:
-    index = ""
-    timing = ""
-    text_lines = lines
-    if len(lines) >= 2 and lines[0].strip().isdigit() and "-->" in lines[1]:
-        index = lines[0].strip()
-        timing = lines[1].strip()
-        text_lines = lines[2:]
-    elif "-->" in lines[0]:
-        timing = lines[0].strip()
-        text_lines = lines[1:]
-    text = "\n".join(text_lines).strip("\n")
+    timing_at = next((i for i, line in enumerate(lines) if "-->" in line), -1)
+    if timing_at < 0:
+        # Блок без тайминга (заголовок WebVTT, служебная строка): не переводим.
+        return Segment(text="\n".join(lines).strip("\n"), passthrough=True)
+    # Всё до тайминга — номер блока (в WebVTT бывает и cue-идентификатор).
+    index = "\n".join(lines[:timing_at]).strip()
+    timing = lines[timing_at].strip()
+    text = "\n".join(lines[timing_at + 1:]).strip("\n")
+    if not text.strip():
+        # Блок без текста: модель не нужна, при записи вернём как было.
+        return Segment(text=text, index=index, timing=timing, passthrough=True)
     return Segment(text=text, index=index, timing=timing)
 
 
@@ -172,11 +191,21 @@ def split_long_text(text: str, max_chars: int) -> list[str]:
 def write_segment(fh, fmt: str, seg: Segment, text: str) -> None:
     """Пишет один блок результата в открытый файл."""
     if fmt == "srt":
-        index = seg.index or str(seg.seq)
-        fh.write(f"{index}\n")
+        head = ""
+        if seg.index:
+            head += f"{seg.index}\n"
         if seg.timing:
-            fh.write(f"{seg.timing}\n")
-        fh.write((text or "").strip("\n") + "\n\n")
+            head += f"{seg.timing}\n"
+        if not head:
+            # Ни номера, ни тайминга (например, заголовок WebVTT) — как есть.
+            fh.write((text or "").rstrip("\n") + "\n\n")
+            return
+        body = (text or "").strip("\n")
+        if body:
+            fh.write(head + body + "\n\n")
+        else:
+            # Блок без текста: номер и тайминг остаются на месте.
+            fh.write(head + "\n")
         return
 
     if seg.passthrough:

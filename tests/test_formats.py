@@ -86,6 +86,85 @@ def test_txt_long_line_splits_with_glue(tmp_path):
     assert out.getvalue() == line + "\n"
 
 
+def test_srt_blocks_without_blank_line_keep_timing(tmp_path):
+    """Пропущенная пустая строка не должна съедать номер и тайминг."""
+    path = tmp_path / "tight.srt"
+    path.write_text(
+        "1\n00:00:01,000 --> 00:00:02,000\nпервый\n"
+        "2\n00:00:03,000 --> 00:00:04,000\nвторой\n",
+        encoding="utf-8",
+    )
+    segments = list(formats.iter_srt_segments(path))
+    assert [s.index for s in segments] == ["1", "2"]
+    assert [s.timing for s in segments] == [
+        "00:00:01,000 --> 00:00:02,000",
+        "00:00:03,000 --> 00:00:04,000",
+    ]
+    assert [s.text for s in segments] == ["первый", "второй"]
+
+    out = StringIO()
+    for seg in segments:
+        formats.write_segment(out, "srt", seg, "перевод")
+    assert out.getvalue() == (
+        "1\n00:00:01,000 --> 00:00:02,000\nперевод\n\n"
+        "2\n00:00:03,000 --> 00:00:04,000\nперевод\n\n"
+    )
+
+
+def test_srt_empty_and_headless_blocks_are_passthrough(tmp_path):
+    """Блок без текста и блок без тайминга не переводим, но сохраняем."""
+    path = tmp_path / "edge.srt"
+    path.write_text(
+        "WEBVTT\n\n"
+        "00:00:01,000 --> 00:00:02,000\nтекст\n\n"
+        "3\n00:00:03,000 --> 00:00:04,000\n\n",
+        encoding="utf-8",
+    )
+    segments = list(formats.iter_srt_segments(path))
+    assert [s.passthrough for s in segments] == [True, False, True]
+    assert segments[0].text == "WEBVTT"
+    assert not segments[0].timing
+
+    out = StringIO()
+    for seg in segments:
+        text = seg.text if seg.passthrough else "перевод"
+        formats.write_segment(out, "srt", seg, text)
+    assert out.getvalue() == (
+        "WEBVTT\n\n"
+        "00:00:01,000 --> 00:00:02,000\nперевод\n\n"
+        "3\n00:00:03,000 --> 00:00:04,000\n\n"
+    )
+
+
+def test_srt_without_numbers_keeps_structure(tmp_path):
+    """Файл без номеров блоков: номера не выдумываем."""
+    path = tmp_path / "nonum.srt"
+    path.write_text("00:00:01,000 --> 00:00:02,000\nпривет\n", encoding="utf-8")
+    segments = list(formats.iter_srt_segments(path))
+    assert segments[0].index == ""
+
+    out = StringIO()
+    formats.write_segment(out, "srt", segments[0], "перевод")
+    assert out.getvalue() == "00:00:01,000 --> 00:00:02,000\nперевод\n\n"
+
+
+def test_srt_cue_identifier_is_kept(tmp_path):
+    """Строка-идентификатор перед таймингом (WebVTT) сохраняется, а не съедается."""
+    path = tmp_path / "ident.vtt"
+    path.write_text(
+        "WEBVTT\n\nintro\n00:01.000 --> 00:03.000\nHello\n", encoding="utf-8"
+    )
+    segments = list(formats.iter_srt_segments(path))
+    cue = segments[-1]
+    assert cue.index == "intro"
+    assert cue.timing == "00:01.000 --> 00:03.000"
+    assert cue.text == "Hello"
+
+    out = StringIO()
+    formats.write_segment(out, "srt", cue, "перевод")
+    assert out.getvalue() == "intro\n00:01.000 --> 00:03.000\nперевод\n\n"
+
+
 def test_default_output_path():
     from pathlib import Path
 
