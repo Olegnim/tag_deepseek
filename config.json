@@ -1,0 +1,40 @@
+{
+  "_readme": "Настройки агента-переводчика. Все ключи необязательны: значения по умолчанию заданы в translator/config.py. Ключ API можно не писать здесь, а задать переменной окружения (см. api.api_key_env).",
+
+  "api": {
+    "api_key_env": "DEEPSEEK_API_KEY",
+    "api_key": "",
+    "base_url": "https://api.deepseek.com",
+    "model": "deepseek-flash",
+    "temperature": 0.3,
+    "timeout": 180,
+    "max_retries": 4
+  },
+
+  "translation": {
+    "_comment": "source: zh | ko | en | auto — режим по умолчанию, его можно сменить при старте (меню) или флагом --source.",
+    "source": "zh",
+    "target": "ru",
+
+    "batch_blocks": 40,
+    "batch_chars": 6000,
+    "context_blocks": 3,
+    "max_tool_steps": 4,
+    "web_search": true,
+
+    "min_block_chars": 500,
+    "max_block_chars": 1500
+  },
+
+  "glossary_file": "glossary/terms.tsv",
+  "skills_dir": "skills",
+
+  "tools": {
+    "web": {
+      "enabled": true,
+      "timeout": 20,
+      "max_chars": 12000,
+      "results": 5
+    }
+  }
+}

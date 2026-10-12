@@ -1,0 +1,7 @@
+# Зависимости агента-переводчика (Python 3.9+).
+# Установка: python -m pip install -r requirements.txt
+
+openai>=1.40   # клиент DeepSeek (OpenAI-совместимый API)
+
+# Только для запуска тестов:
+pytest>=7.0
