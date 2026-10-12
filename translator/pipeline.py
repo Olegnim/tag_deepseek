@@ -14,10 +14,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Iterator
 
-from . import formats, prompts
+from . import formats, prompts, stop
 from .client import ApiError, DeepSeekClient
 from .glossary import Term, select_terms
 from .progress import Progress
+from .stop import StopRequested
 from .websearch import fetch_url, web_search
 
 TOOL_SPECS = [
@@ -162,6 +163,9 @@ class Translator:
             api_chars = 0
 
         for segment in segments:
+            # Сигнал остановки проверяем только на границе пакета: текущий
+            # пакет уже записан целиком, ничего не обрывается на полублоке.
+            stop.check()
             if segment.passthrough:
                 batch.append(segment)
                 continue
@@ -173,7 +177,8 @@ class Translator:
             if api_blocks >= self.batch_blocks or api_chars >= self.batch_chars:
                 flush()
 
-        flush()
+        if not stop.stop_requested():
+            flush()
         return stats
 
     # ------------------------------------------------------------ пакет
@@ -217,6 +222,8 @@ class Translator:
         after_tools = False
 
         for _ in range(attempts):
+            # Между повторными запросами тоже даём остановке сработать.
+            stop.check()
             label = "модель думает после веб-поиска" if after_tools else "модель думает"
             response = self._chat(messages, tools, label=label)
             after_tools = False
@@ -254,6 +261,7 @@ class Translator:
     def _translate_one_by_one(self, segments: list[formats.Segment], stats: Stats) -> dict[int, str]:
         result: dict[int, str] = {}
         for segment in segments:
+            stop.check()
             try:
                 response = self._chat(self._messages([segment]), None, label="перевод по одному блоку")
             except ApiError as exc:

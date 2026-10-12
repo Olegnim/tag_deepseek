@@ -4,7 +4,9 @@ import json
 import re
 from io import StringIO
 
-from translator import pipeline
+import pytest
+
+from translator import pipeline, stop
 from translator.formats import Segment
 
 
@@ -191,3 +193,25 @@ def test_batches_split_by_block_count():
     )
     assert stats.batches == 3
     assert stats.blocks == 5
+
+
+def test_soft_stop_keeps_already_translated_batches():
+    """Остановку видно между пакетами: готовые блоки уже на диске."""
+    def responder(messages):
+        stop.request_stop()
+        content = messages[-1]["content"]
+        ids = [int(x) for x in re.findall(r'"id":\s*(\d+)', content)]
+        return json.dumps([{"id": i, "text": f"П{i}"} for i in ids], ensure_ascii=False)
+
+    segments = [Segment(text=f"строка {i}") for i in range(1, 6)]
+    out = StringIO()
+    translator = make_translator(FakeClient(responder), fmt="txt", batch_blocks=2)
+
+    try:
+        with pytest.raises(stop.StopRequested):
+            translator.run(iter(segments), out, total=5)
+    finally:
+        stop.clear()
+
+    # Первый пакет дописан целиком, до второго дело не дошло.
+    assert out.getvalue() == "П1\nП2\n"

@@ -32,12 +32,14 @@ for _stream in (sys.stdout, sys.stderr):
 
 from translator import __version__, formats, inbox
 from translator import config as config_mod
+from translator import stop as stop_ctl
 from translator.client import ApiError, DeepSeekClient
 from translator.glossary import load_glossary
 from translator.langs import DEFAULT_SOURCE, DEFAULT_TARGET, SOURCE_CHOICES, lang_name
 from translator.pipeline import Stats, Translator
 from translator.progress import Progress
 from translator.skills import load_skills, skill_names
+from translator.stop import StopRequested
 
 MENU = [
     ("zh", "Китайский → Русский (по умолчанию)"),
@@ -249,6 +251,10 @@ def translate_file(
     except KeyboardInterrupt:
         progress.stop()
         raise
+    except StopRequested:
+        # Мягкая остановка: файл закроется сам, уже переведённая часть останется.
+        progress.stop()
+        raise
     progress.finish()
 
     details = f"{stats.blocks} блоков за {stats.elapsed:.1f} с"
@@ -356,6 +362,9 @@ def main() -> int:
     done = 0
     interrupted = False
 
+    # Ctrl+C и SIGTERM: просьба остановиться гасит перевод между пакетами —
+    # без «висящих» потоков, недописанных файлов и потерянного исходника.
+    stop_ctl.install(log=progress.note)
     for index, path in enumerate(jobs, 1):
         if len(jobs) > 1:
             print(f"[{index}/{len(jobs)}] {path.name}")
@@ -381,6 +390,11 @@ def main() -> int:
             print(f"\nПрервано пользователем. Частичный перевод: {output_path}")
             interrupted = True
             break
+        except StopRequested:
+            progress.stop()
+            print(f"\nОстановлено. Частичный перевод сохранён: {output_path}")
+            interrupted = True
+            break
 
         if success:
             done += 1
@@ -389,6 +403,7 @@ def main() -> int:
         else:
             print(f"    ✗ {message}")
 
+    stop_ctl.restore()
     print("=" * 60)
     print(f"Итог: переведено {done} из {len(jobs)} за {time.time() - started:.1f} с.")
     if interrupted:
@@ -404,3 +419,5 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\nПрервано.")
         sys.exit(130)
+    finally:
+        stop_ctl.restore()
