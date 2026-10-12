@@ -36,6 +36,8 @@ DEFAULTS: dict = {
     },
     "glossary_file": "glossary/terms.tsv",
     "skills_dir": "skills",
+    "input_dir": "input",
+    "output_dir": "output",
     "tools": {
         "web": {
             "enabled": True,

@@ -193,6 +193,12 @@ cython_debug/
 .env
 .env.*
 
+# Папки обмена файлами: сами папки храним, содержимое — нет
+input/*
+!input/.gitkeep
+output/*
+!output/.gitkeep
+
 # Готовые переводы
 *.ru.srt
 *.ru.txt
